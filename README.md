@@ -1,4 +1,4 @@
-# Pointerformer
+# Geoformer
 
 We provide code, data and trained models. 
 
