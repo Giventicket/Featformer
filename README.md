@@ -17,7 +17,7 @@ You can download our trained models and datasets from [here](https://drive.googl
 
 train a model on TSP100.
 
-`python train.py graph_size=100 group_size=100`
+`python3 train.py graph_size=100 group_size=100`
 
 ## Evaluate
 
