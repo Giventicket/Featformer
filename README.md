@@ -23,8 +23,8 @@ train a model on TSP100.
 
 eval on tsp_random
 
-`python eval.py val_data_path=./data/tsp100_test_concorde.txt load_checkpoint_path=./result_ckpt/model100.ckpt`
+python3 eval.py val_data_path=./trained_model_and_data/data/tsp100_test_concorde.txt load_checkpoint_path=./outputs/TSP-N100G100-revmha6E128KD-s1234-1222T0415/checkpoint.ckpt
 
 eval on tsp_partner
 
-`python eval.py val_data_path=./data/partner_100.txt load_checkpoint_path=./result_ckpt/model100.ckpt real_data=true`
+python3 eval.py val_data_path=./trained_model_and_data/data/partner_100.txt load_checkpoint_path=./outputs/TSP-N100G100-revmha6E128KD-s1234-1222T0415/checkpoint.ckpt real_data=true
