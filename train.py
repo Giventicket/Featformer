@@ -15,8 +15,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader, Dataset
 import models
 import utils
-from torch.distributions.categorical import Categorical
 
+from torch.distributions.categorical import Categorical
 from env import MultiTrajectoryTSP, TSPDataset
 
 
@@ -24,9 +24,7 @@ class TSPModel(pl.LightningModule):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         if cfg.node_dim > 2:
-            assert (
-                "noAug" in cfg.val_type
-            ), "High-dimension TSP doesn't support augmentation"
+            assert "noAug" in cfg.val_type, "High-dimension TSP doesn't support augmentation"
 
         ## Encoder model
         if cfg.encoder_type == "mha":
@@ -36,6 +34,7 @@ class TSPModel(pl.LightningModule):
                 embedding_dim=cfg.embedding_dim,
                 input_dim=24 if cfg.data_augment else 2,
                 add_init_projection=cfg.add_init_projection,
+                use_position_encoding=cfg.encoder_use_position_encoding,
             )
         elif cfg.encoder_type == "revmha":
             self.encoder = models.RevMHAEncoder(
@@ -45,6 +44,7 @@ class TSPModel(pl.LightningModule):
                 input_dim=24 if cfg.data_augment else 2,
                 intermediate_dim=cfg.embedding_dim * 4,
                 add_init_projection=cfg.add_init_projection,
+                use_position_encoding=cfg.encoder_use_position_encoding,
             )
 
         ## Decoder model
@@ -56,16 +56,20 @@ class TSPModel(pl.LightningModule):
                 multi_pointer=cfg.multi_pointer,
                 multi_pointer_level=cfg.multi_pointer_level,
                 add_more_query=cfg.add_more_query,
+                # use_position_encoding=cfg.decoder_pos_encoding,
+                graph_size=cfg.graph_size,
             )
         else:
             self.decoder = models.Decoder(
                 embedding_dim=cfg.embedding_dim,
                 n_heads=cfg.n_heads,
                 tanh_clipping=cfg.tanh_clipping,
+                # use_position_encoding=cfg.decoder_pos_encoding,
+                graph_size=cfg.graph_size,
             )
 
         self.cfg = cfg
-        self.save_hyperparameters(cfg)
+        self.save_hyperparameters(cfg)  # pytorch lightening에서 config file이 저장됨.
         self.val_outputs = []
 
     def configure_optimizers(self):
@@ -74,9 +78,7 @@ class TSPModel(pl.LightningModule):
             lr=self.cfg.learning_rate * len(self.cfg.gpus),
             weight_decay=self.cfg.weight_decay,
         )
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=1, gamma=1.0
-        )
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=1.0)
         return [optimizer], [{"scheduler": lr_scheduler, "interval": "epoch"}]
 
     def train_dataloader(self):
@@ -86,6 +88,9 @@ class TSPModel(pl.LightningModule):
             node_dim=self.cfg.node_dim,
             num_samples=self.cfg.epoch_size,
             data_distribution=self.cfg.data_distribution,
+            embedding_dim=self.cfg.embedding_dim,
+            use_position_encoding=self.cfg.encoder_use_position_encoding,
+            position_encoding_type=self.cfg.encoder_position_encoding_type,
         )
         return DataLoader(
             dataset,
@@ -101,6 +106,9 @@ class TSPModel(pl.LightningModule):
             num_samples=self.cfg.val_size,
             data_distribution=self.cfg.data_distribution,
             data_path=self.cfg.val_data_path,
+            embedding_dim=self.cfg.embedding_dim,
+            use_position_encoding=self.cfg.encoder_use_position_encoding,
+            position_encoding_type=self.cfg.encoder_position_encoding_type,
         )
         return DataLoader(
             dataset,
@@ -110,6 +118,10 @@ class TSPModel(pl.LightningModule):
         )
 
     def training_step(self, batch, _):
+        pe = None
+        if type(batch) == list:
+            batch, pe = batch
+
         B, N, _ = batch.shape
         G = self.group_size
 
@@ -123,8 +135,8 @@ class TSPModel(pl.LightningModule):
         if self.cfg.data_augment:
             batch = utils.data_augment(batch)
 
-        # Encode
-        embeddings = self.encoder(batch)
+        # Encoder
+        embeddings = self.encoder(batch, pe)
         self.decoder.reset(batch, embeddings, G)  # decoder reset
 
         entropy_list = []
@@ -137,16 +149,11 @@ class TSPModel(pl.LightningModule):
             else:
                 last_node = s.current_node
 
-            action_probs = self.decoder(
-                last_node.to(self.device), s.ninf_mask.to(self.device), s.selected_count
-            )
+            action_probs = self.decoder(last_node.to(self.device), s.ninf_mask.to(self.device), s.selected_count)
             m = Categorical(action_probs.reshape(B * G, -1))
             entropy_list.append(m.entropy().mean().item())
             action = m.sample().view(B, G)
-            chosen_action_prob = (
-                action_probs[batch_idx_range, group_idx_range, action].reshape(B, G)
-                + 1e-8
-            )
+            chosen_action_prob = action_probs[batch_idx_range, group_idx_range, action].reshape(B, G) + 1e-8
             log_prob += chosen_action_prob.log()
             s, r, d = env.step(action.cpu())
 
@@ -160,9 +167,7 @@ class TSPModel(pl.LightningModule):
                 else r_trans
             )
         else:
-            advantage = (
-                (r_trans - r_trans.mean(dim=1, keepdim=True)) if G != 1 else r_trans
-            )
+            advantage = (r_trans - r_trans.mean(dim=1, keepdim=True)) if G != 1 else r_trans
         loss = (-advantage * log_prob).mean()
 
         length_max = -r.max(dim=1)[0].mean().clone().detach().item()
@@ -171,19 +176,27 @@ class TSPModel(pl.LightningModule):
         adv = advantage.abs().mean().clone().detach().item()
 
         self.log(
-            name="length_max", value=length_max, prog_bar=True,
+            name="length_max",
+            value=length_max,
+            prog_bar=True,
         )  # sync_dist=True
         self.log(
-            name="length_mean", value=lenght_mean, prog_bar=True,
+            name="length_mean",
+            value=lenght_mean,
+            prog_bar=True,
         )
         self.log(
-            name="entropy", value=entropy_mean, prog_bar=True,
+            name="entropy",
+            value=entropy_mean,
+            prog_bar=True,
         )
         self.log(name="adv", value=adv, prog_bar=True)
 
         embed_max = embeddings.abs().max()
         self.log(
-            name="embed_max", value=embed_max, prog_bar=True,
+            name="embed_max",
+            value=embed_max,
+            prog_bar=True,
         )
 
         assert torch.isnan(loss).sum() == 0, print("loss is nan!")
@@ -196,7 +209,13 @@ class TSPModel(pl.LightningModule):
         self.train_length_std = outputs.std().item()
 
     def validate_all(self, batch, val_type=None, return_pi=False):
+        pe = None
+        if type(batch) == list:
+            batch, pe = batch
+            pe = pe.unsqueeze(0).expand(8, -1, -1, -1).reshape(-1, pe.shape[1], pe.shape[2])
+
         batch = utils.augment_xy_data_by_8_fold(batch)
+
         B, N, _ = batch.shape
         G = N
 
@@ -206,7 +225,7 @@ class TSPModel(pl.LightningModule):
         if self.cfg.data_augment:
             batch = utils.data_augment(batch)
 
-        embeddings = self.encoder(batch)
+        embeddings = self.encoder(batch, pe)
         self.decoder.reset(batch, embeddings, G, trainging=False)
 
         first_action = torch.randperm(N)[None, :G].expand(B, G).to(self.device)
@@ -235,15 +254,11 @@ class TSPModel(pl.LightningModule):
         if return_pi:
             best_pi_greedy = pi[0, :, 0]
             idx_dim_ntraj = idx_dim_ntraj.reshape(B, 1, 1)
-            best_pi_n_traj = pi[0, :, :].gather(
-                1, idx_dim_ntraj.repeat(1, 1, N)
-            )  # (B,G,N)
+            best_pi_n_traj = pi[0, :, :].gather(1, idx_dim_ntraj.repeat(1, 1, N))  # (B,G,N)
             idx_dim_0 = idx_dim_0.reshape(1, B, 1, 1)
             idx_dim_2 = idx_dim_2.reshape(8, B, 1, 1).gather(0, idx_dim_0)
             best_pi_aug_ntraj = pi.gather(0, idx_dim_0.repeat(1, 1, G, N))
-            best_pi_aug_ntraj = best_pi_aug_ntraj.gather(
-                2, idx_dim_2.repeat(1, 1, 1, N)
-            )
+            best_pi_aug_ntraj = best_pi_aug_ntraj.gather(2, idx_dim_2.repeat(1, 1, 1, N))
             return -max_reward_aug_ntraj, best_pi_aug_ntraj.squeeze()
         return {
             "max_reward_aug_ntraj": -max_reward_aug_ntraj,
@@ -262,12 +277,12 @@ class TSPModel(pl.LightningModule):
 
     def on_validation_epoch_start(self) -> None:
         self.validation_start_time = time.time()
-        
+
     def on_validation_epoch_end(self):
         max_reward_aug_ntraj = [item["max_reward_aug_ntraj"] for item in self.val_outputs]
         reward_greedy = [item["reward_greedy"] for item in self.val_outputs]
         reward_ntraj = [item["reward_ntraj"] for item in self.val_outputs]
-        
+
         self.val_outputs = []
 
         self.max_reward_aug_ntraj = torch.cat(max_reward_aug_ntraj).mean().item()
@@ -276,7 +291,7 @@ class TSPModel(pl.LightningModule):
         self.reward_greedy_std = torch.cat(reward_greedy).std().item()
         self.reward_ntraj = torch.cat(reward_ntraj).mean().item()
         self.reward_ntraj_std = torch.cat(reward_ntraj).std().item()
-        
+
         validation_time = time.time() - self.validation_start_time
 
         self.log_dict(
@@ -295,15 +310,9 @@ class TSPModel(pl.LightningModule):
             f"\nEpoch {self.current_epoch}: ",
             # f'train_graph_size={self.train_graph_size}, ',
             # 'train_performance={:.03f}±{:.03f}, '.format(self.train_length_mean, self.train_length_std),
-            "max_reward_aug_ntraj={:.03f}±{:.03f}, ".format(
-                self.max_reward_aug_ntraj, self.max_reward_aug_ntraj_std
-            ),
-            "reward_greedy={:.03f}±{:.3f}, ".format(
-                self.reward_greedy, self.reward_greedy_std
-            ),
-            "reward_ntraj={:.03f}±{:.03f}, ".format(
-                self.reward_ntraj, self.reward_ntraj_std
-            ),
+            "max_reward_aug_ntraj={:.03f}±{:.03f}, ".format(self.max_reward_aug_ntraj, self.max_reward_aug_ntraj_std),
+            "reward_greedy={:.03f}±{:.3f}, ".format(self.reward_greedy, self.reward_greedy_std),
+            "reward_ntraj={:.03f}±{:.03f}, ".format(self.reward_ntraj, self.reward_ntraj_std),
             "validation time={:.03f}".format(validation_time),
         )
 
@@ -326,7 +335,7 @@ def run(cfg: DictConfig) -> None:
 
     # build  TSPModel
     tsp_model = TSPModel(cfg)
-    
+
     checkpoint_callback = ModelCheckpoint(
         monitor="reward_ntraj",
         dirpath=os.path.join(root_dir, "checkpoints"),
@@ -366,7 +375,7 @@ def run(cfg: DictConfig) -> None:
         resume = cfg.load_path
     else:
         resume = None
-    
+
     # build trainer
     trainer = pl.Trainer(
         default_root_dir=root_dir,
@@ -379,6 +388,7 @@ def run(cfg: DictConfig) -> None:
         enable_checkpointing=resume,
         logger=loggers,
         callbacks=[checkpoint_callback],
+        # strategy="ddp_find_unused_parameters_true",
     )
 
     # training and save ckpt

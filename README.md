@@ -17,14 +17,14 @@ You can download our trained models and datasets from [here](https://drive.googl
 
 train a model on TSP100.
 
-`python train.py graph_size=100 group_size=100`
+`python3 train.py graph_size=100 group_size=100 gpus=[0,1,2,3]`
 
 ## Evaluate
 
 eval on tsp_random
 
-`python eval.py val_data_path=./data/tsp100_test_concorde.txt load_checkpoint_path=./result_ckpt/model100.ckpt`
+`python3 eval.py val_data_path=./data/tsp100_test_concorde.txt load_checkpoint_path=./result_ckpt/model100.ckpt`
 
 eval on tsp_partner
 
-`python eval.py val_data_path=./data/partner_100.txt load_checkpoint_path=./result_ckpt/model100.ckpt real_data=true`
+`python3 eval.py val_data_path=./data/partner_100.txt load_checkpoint_path=./result_ckpt/model100.ckpt real_data=true`

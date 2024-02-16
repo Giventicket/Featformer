@@ -6,10 +6,10 @@ decoder_dim: 128
 embedding_dim: 128
 n_layers: 6
 group_size: 100
-add_init_projection: true # only for mha_encoder
+add_init_projection: false # only for mha_encoder
 n_heads: 8 # only for mha_encoder
 tanh_clipping: 50
-total_epoch: 500
+total_epoch: 100 # 500
 epoch_size: 100000
 val_size: 10000
 train_batch_size: 64
@@ -18,10 +18,10 @@ learning_rate: 1e-4
 weight_decay: 1e-6
 data_distribution: uniform # or normals
 seed: 1234
-gpus: [0]
+gpus: [0, 1, 2, 3]
 precision: 16-mixed
 val_type: x8Aug_nTraj
-default_run_name: TSP-N${graph_size}G${group_size}-${encoder_type}${n_layers}E${embedding_dim}KD-s${seed}-${now:%m%dT%H%M}
+default_run_name: TSP-N${graph_size}G${group_size}-E${encoder_type}-T${encoder_position_encoding_type}-${now:%m%dT%H%M}
 
 wandb: false
 wandb_project: tsp_eAM
@@ -32,6 +32,8 @@ save_dir: ./outputs/
 val_data_path: ./trained_model_and_data/data/tsp${graph_size}_test_concorde.txt
 
 data_augment: true
+encoder_use_position_encoding: false # true
+encoder_position_encoding_type: none # none, xy_sum, rad_sum, xy_concat, rad_concat
 multi_pointer: 8
 divide_std: true
 add_more_query: true
@@ -43,3 +45,5 @@ load_checkpoint_path: ./result_ckpt/model100.ckpt
 real_data: false
 integer: false
 sample: false
+
+# python3 eval.py save_dir=./eval/ encoder_use_position_encoding=true encoder_position_encoding_type=xy_concat tensorboard=false val_data_path=./trained_model_and_data/data/tsp100_test_concorde.txt load_checkpoint_path=./outputs/TSP-N100G100-Erevmha-Txy_concat-0104T0624/checkpoint.ckpt

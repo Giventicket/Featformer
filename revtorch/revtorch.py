@@ -18,7 +18,7 @@ class ReversibleBlock(nn.Module):
         f_block (nn.Module): arbitrary subnetwork whos output shape is equal to its input shape
         g_block (nn.Module): arbitrary subnetwork whos output shape is equal to its input shape
         split_along_dim (integer): dimension along which the tensor is split into the two parts requried for the reversible block
-        fix_random_seed (boolean): Use the same random seed for the forward and backward pass if set to true 
+        fix_random_seed (boolean): Use the same random seed for the forward and backward pass if set to true
     """
 
     def __init__(self, f_block, g_block, split_along_dim=1, fix_random_seed=False):
@@ -168,9 +168,7 @@ class _ReversibleModuleFunction(torch.autograd.function.Function):
         if ctx.eagerly_discard_variables:
             del ctx.y
         for i in range(len(ctx.reversible_blocks) - 1, -1, -1):
-            y, dy = ctx.reversible_blocks[i].backward_pass(
-                y, dy, not ctx.eagerly_discard_variables
-            )
+            y, dy = ctx.reversible_blocks[i].backward_pass(y, dy, not ctx.eagerly_discard_variables)
         if ctx.eagerly_discard_variables:
             del ctx.reversible_blocks
         return dy, None, None
@@ -187,8 +185,8 @@ class ReversibleSequence(nn.Module):
     Arguments:
         reversible_blocks (nn.ModuleList): A ModuleList that exclusivly contains instances of ReversibleBlock
         which are to be used in the reversible sequence.
-        eagerly_discard_variables (bool): If set to true backward() discards the variables requried for 
-		calculating the gradient and therefore saves memory. Disable if you call backward() multiple times.
+        eagerly_discard_variables (bool): If set to true backward() discards the variables requried for
+                calculating the gradient and therefore saves memory. Disable if you call backward() multiple times.
     """
 
     def __init__(self, reversible_blocks, eagerly_discard_variables=True):
@@ -206,7 +204,5 @@ class ReversibleSequence(nn.Module):
         :param x: Input tensor
         :return: Output tensor
         """
-        x = _ReversibleModuleFunction.apply(
-            x, self.reversible_blocks, self.eagerly_discard_variables
-        )
+        x = _ReversibleModuleFunction.apply(x, self.reversible_blocks, self.eagerly_discard_variables)
         return x

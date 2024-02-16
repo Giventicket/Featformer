@@ -49,9 +49,7 @@ def augment_xy_data_by_8_fold(xy_data, training=False):
 
     # data_augmented.shape = [B, N, 16]
     if training:
-        data_augmented = torch.cat(
-            (dat1, dat2, dat3, dat4, dat5, dat6, dat7, dat8), dim=2
-        )
+        data_augmented = torch.cat((dat1, dat2, dat3, dat4, dat5, dat6, dat7, dat8), dim=2)
         return data_augmented
 
     # data_augmented.shape = [8*B, N, 2]
@@ -63,9 +61,7 @@ def data_augment(batch):
     batch = augment_xy_data_by_8_fold(batch, training=True)
     theta = []
     for i in range(8):
-        theta.append(
-            torch.atan(batch[:, :, i * 2 + 1] / batch[:, :, i * 2]).unsqueeze(-1)
-        )
+        theta.append(torch.atan(batch[:, :, i * 2 + 1] / batch[:, :, i * 2]).unsqueeze(-1))
     theta.append(batch)
     batch = torch.cat(theta, dim=2)
     return batch

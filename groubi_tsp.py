@@ -34,10 +34,7 @@ def solver(data_path):
             tour = subtour(vals)
             if len(tour) < n:
                 # add subtour elimination constr. for every pair of cities in tour
-                model.cbLazy(
-                    gp.quicksum(model._vars[i, j] for i, j in combinations(tour, 2))
-                    <= len(tour) - 1
-                )
+                model.cbLazy(gp.quicksum(model._vars[i, j] for i, j in combinations(tour, 2)) <= len(tour) - 1)
 
     # Given a tuplelist of edges, find the shortest subtour
 
@@ -63,7 +60,6 @@ def solver(data_path):
     all_res = []
     start = time.time()
     for points in data:
-
         dist = {
             (i, j): math.sqrt(sum((points[i][k] - points[j][k]) ** 2 for k in range(2)))
             for i in range(n)
